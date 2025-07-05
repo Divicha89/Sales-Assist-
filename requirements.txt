@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-matplotlib
 streamlit
 pandas
 openpyxl
-=======
-matplotlib
-streamlit
-pandas
-openpyxl
->>>>>>> e83fe0523af44b4c8d0d84f74823ec719987bd2e
-ollama 
