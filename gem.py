@@ -51,8 +51,6 @@ faq_questions = [
     "List all machine learning projects",
 ]
 options = ["FAQs"] + faq_questions
-import os
-st.write("Files in current directory:", os.listdir())
 
 def handle_faq_selection():
     selected = st.session_state.faq_selectbox
