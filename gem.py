@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
-import ollama
+import google.generativeai as genai  # Import Google Generative AI library
 
 # --- Page Config ---
 st.set_page_config(page_title="PitchMate", page_icon="🪟", layout="wide")
@@ -34,7 +34,6 @@ function = st.sidebar.selectbox("Select a Category", [
     "Project Showcase"
 ])
 
-
 # FAQ Section
 st.sidebar.markdown("Frequently Asked Prompts")
 faq_questions = [
@@ -63,6 +62,15 @@ selected = st.sidebar.selectbox(
     key="faq_selectbox",
     on_change=handle_faq_selection)
 
+# --- Gemini API Key Setup ---
+gemini_api_key = "AIzaSyDfuo-L0KOU1zZAsABl6Ltajy13EgvBpMc"  # Replace with your actual Gemini API key
+if not gemini_api_key:
+    st.error("Please provide a Gemini API key.")
+    st.stop()
+
+# Initialize Gemini client
+genai.configure(api_key=gemini_api_key)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- Excel File Setup ---
 @st.cache_resource
@@ -73,7 +81,7 @@ def init_db():
         'companies': 'companies.xlsx',
         'dscc_activities': 'dscc_activities.xlsx',
         'projects': 'projects.xlsx',
-            }
+    }
     dataframes = {}
     for table, file_path in excel_files.items():
         try:
@@ -91,7 +99,7 @@ def init_db():
                 df['topic'] = df.get('topic', pd.Series()).str.lower().str.strip()
             if table == 'companies':
                 df['company_name'] = df.get('company_name', pd.Series()).astype(str)
-                df['role'] = df.get('role', pd.Series()).str.lower().str.strip()
+                df['role'] = df.get('logos/role', pd.Series()).str.lower().str.strip()
                 df['ctc_range'] = df.get('ctc_range', pd.Series()).str.extract(r'(\d+\.?\d*)').astype(float)
                 df['hiring_frequency'] = df.get('hiring_frequency', pd.Series()).str.lower().str.strip()
             if table == 'trainers':
@@ -186,8 +194,14 @@ Please provide a well-formatted response that includes:
 3. Inspiring student stories at the end with LinkedIn links, testimonial prompts
 
 Make it professional, structured, and motivational."""
-        response = ollama.chat(model="llama3.2", messages=[{"role": "user", "content": prompt}])
-        return response['message']['content']
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=1500,
+                temperature=0.7
+            )
+        )
+        return response.text
 
     # ------------------------------
     # CASE 2: Company Query → Filtered Table + LLM
@@ -222,7 +236,6 @@ Query: {query}
 - The table should include **every filtered result**, even if there are many.
 - Keep formatting clean and consistent.
 
-
 Generate a detailed summary including:
 1. A table with:
    - Company Name
@@ -234,8 +247,14 @@ Generate a detailed summary including:
 3. A short section titled: **Why This Info Matters for Learners**, showing how students can use this insight for better placement preparation.
 
 Make the summary professional, structured, and markdown formatted."""
-        response = ollama.chat(model="llama3.2", messages=[{"role": "user", "content": prompt}])
-        return response['message']['content']
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=1500,
+                temperature=0.7
+            )
+        )
+        return response.text
 
     # ------------------------------
     # Fallback
@@ -245,11 +264,10 @@ Make the summary professional, structured, and markdown formatted."""
 
 # --- Formatting with ollama ---
 def format_with_ollama(data, query, function):
-
     table_configs = {
-    'DSCC Activities': {
-        'fields': ['name of event', 'agenda', 'cadance'],  # Note: matching CSV column names exactly
-        'prompt': """## 🎯 DSCC Activities: Transforming Learners into Industry-Ready Professionals
+        'DSCC Activities': {
+            'fields': ['name of event', 'agenda', 'cadance'],  # Note: matching CSV column names exactly
+            'prompt': """## 🎯 DSCC Activities: Transforming Learners into Industry-Ready Professionals
 
 Here's a comprehensive overview of all DSCC activities designed to enhance your learning journey:
 
@@ -265,12 +283,10 @@ Here's a comprehensive overview of all DSCC activities designed to enhance your 
 - **Confidence Building**: Gain the confidence to tackle complex business problems
 
 *These activities are your gateway to becoming industry-ready data science professionals!*"""
-    }
-,
-
-    'Project Showcase': {
-    'fields': ['project_title', 'domain', 'topic', 'difficulty_level'],
-    'prompt': """#### Student Project Showcase
+        },
+        'Project Showcase': {
+            'fields': ['project_title', 'domain', 'topic', 'difficulty_level'],
+            'prompt': """#### Student Project Showcase
 
 | Project Title | Domain | Technologies Used | Skill Level |
 |---------------|--------|-------------------|-------------|
@@ -288,12 +304,10 @@ Here's a comprehensive overview of all DSCC activities designed to enhance your 
 
 *Each of these projects showcases our students’ readiness for real-world business challenges and plays a crucial role in shaping job-winning resumes.*
 """
-
-},    
-
-    'Company Info': {
-        'fields': ['company_name', 'role', 'ctc_range', 'hiring_frequency', 'requirements'],
-        'prompt': """#### Companies Hiring Our Graduates
+        },    
+        'Company Info': {
+            'fields': ['company_name', 'role', 'ctc_range', 'hiring_frequency', 'requirements'],
+            'prompt': """#### Companies Hiring Our Graduates
 
 | Company Name | Roles Available | CTC Range | Hiring Frequency | Key Requirements |
 |--------------|-----------------|-----------|------------------|------------------|
@@ -303,11 +317,10 @@ Here's a comprehensive overview of all DSCC activities designed to enhance your 
 
 🔍 Company Summaries  
 {summaries}"""
-    },
-
-    'Trainer Details': {
-        'fields': ['name', 'profile', 'strengths', 'skillset', 'experience', 'location', 'linkedin'],
-        'prompt': """👨‍🏫 Trainer Profile: {0}
+        },
+        'Trainer Details': {
+            'fields': ['name', 'profile', 'strengths', 'skillset', 'experience', 'location', 'linkedin'],
+            'prompt': """👨‍🏫 Trainer Profile: {0}
 
 | Field | Details |
 |-------|---------|
@@ -316,24 +329,22 @@ Here's a comprehensive overview of all DSCC activities designed to enhance your 
 | Skill Set | {3} |
 | Strengths | {2} |
 | Linkedin Profile | [Here]({6}) |""",
-        'default_trainers': [
-            ['Nikita Tandel', 'AVP, Data Science training', 'Machine Learning, Statistical Analysis', 'Python, R, SQL, Tableau', '5+ years', 'Hyderabad', 'https://linkedin.com/in/nikita'],
-            ['Karthik', 'VP, Head of Data Science', 'Deep Learning, NLP', 'Python, TensorFlow, PyTorch', '7+ years', 'Bangalore', 'https://linkedin.com/in/karthik']
-        ]
-    },
-
-    'Placement Results': {
-        'fields': ['name', 'education', 'company', 'role', 'ctc', 'location'],
-        'prompt': """🎓 Placement Results
+            'default_trainers': [
+                ['Nikita Tandel', 'AVP, Data Science training', 'Machine Learning, Statistical Analysis', 'Python, R, SQL, Tableau', '5+ years', 'Hyderabad', 'https://linkedin.com/in/nikita'],
+                ['Karthik', 'VP, Head of Data Science', 'Deep Learning, NLP', 'Python, TensorFlow, PyTorch', '7+ years', 'Bangalore', 'https://linkedin.com/in/karthik']
+            ]
+        },
+        'Placement Results': {
+            'fields': ['name', 'education', 'company', 'role', 'ctc', 'location'],
+            'prompt': """🎓 Placement Results
 
 | Name | Education | Company | Role | CTC | Location |
 |------|-----------|---------|------|-----|----------|
 {rows}
 
 These results showcase the successful career paths of students across various domains and locations."""
+        }
     }
-}
-
 
     config = table_configs.get(function)
     if not config:
@@ -385,7 +396,6 @@ if 'chat_history' not in st.session_state:
 tab1, tab2 = st.tabs(["Main", "Chat History"])
 
 with tab1:
-       
     # --- Streamlit UI ---
     dataframes = init_db()
     query = st.text_input("What do you wanna know", key="user_input")
@@ -454,7 +464,6 @@ with tab1:
                 })
         else:
             st.warning("Please enter a query.")
-# --- Clear Chat History Button ---
 
 with tab2:
     st.markdown("### Chat History")
