@@ -24,7 +24,7 @@ h1, h2, h3, h4, h5 { color: white; }
 </style>""", unsafe_allow_html=True)
 
 # --- Gemini API Key Setup ---
-gemini_api_key = "AIzaSyBcHxNVlh-5TdXcLfg-lQnUv9-hLcbaasU"  # Replace with your actual Gemini API key
+gemini_api_key = "AIzaSyDsLZcDrZ2bC4fc7RVSMRP3Vl__vrVQwNM"  # Replace with your actual Gemini API key
 if not gemini_api_key:
     st.error("Please provide a Gemini API key.")
     st.stop()
