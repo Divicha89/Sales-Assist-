@@ -1,5 +1,4 @@
 # pitchmate_streamlit.py
-import time
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -27,7 +26,7 @@ h1, h2, h3, h4, h5 { color: white; }
 </style>""", unsafe_allow_html=True)
 
 # --- Gemini API Key Setup ---
-gemini_api_key = st.secrets["gemini"]["api_key"]
+gemini_api_key = "AIzaSyC9o79E9lW0eiCAxgHc8Xe0oGUPRK7dNd8"
 if not gemini_api_key:
     st.error("Please provide a Gemini API key.")
     st.stop()
@@ -63,11 +62,11 @@ def handle_faq_selection():
 selected = st.sidebar.selectbox("FAQs", options, key="faq_selectbox", on_change=handle_faq_selection)
 
 # --- SQLite DB Integration ---
-DB_FILE = "rec.db"
+DB_FILE = "courses_data.db"
 @st.cache_resource
 def init_db():
     conn = sqlite3.connect(DB_FILE)
-    tables = ['trainers', 'placements', 'companies', 'dscc_activities', 'projects', 'Courses']
+    tables = ['trainers', 'placements', 'companies', 'dscc_activities', 'projects', 'courses']
     dataframes = {}
     for table in tables:
         try:
@@ -88,8 +87,7 @@ def query_data_with_gemini(dataframes, query):
         "placements": ["placement", "ctc"],
         "companies": ["company", "companies"],
         "dscc_activities": ["dscc"],
-        "projects": ["project"],
-        "Courses" : ['course','Course','curriculum']
+        "projects": ["project"]
     }
     selected_table = None
     for key, terms in mapping.items():
@@ -104,10 +102,10 @@ def query_data_with_gemini(dataframes, query):
     if df is None or df.empty:
         return f"No data found for {selected_table}."
 
-    possible_codes = dataframes['Courses']['course_code'].tolist()
+    possible_codes = dataframes['courses']['course_code'].tolist()
     found_code = next((code for code in possible_codes if code.lower() in query_lower), None)
 
-    if found_code and 'Course' in df.columns:
+    if found_code and 'course' in df.columns:
         df = df[df['course'].str.lower() == found_code.lower()]
 
     context = df.to_string(index=False)
@@ -151,7 +149,7 @@ Query: {query}
 
 Please provide a well-formatted response that includes:
 1. A clear answer/summary at the top (e.g., "Top CTC record: X LPA")
-2. A table with Name, Course, Education Background, Company, Role, CTC, Location
+2. A table with Name, Course, Education Background, Company, Role, CTC, Location, Total Hires (sum of hires for each company)
 3. Inspiring student stories at the end with LinkedIn links, testimonial prompts
 
 Make it professional, structured, and motivational."""
@@ -170,9 +168,8 @@ Generate a detailed summary including:
    - CTC Range
    - Hiring Frequency
    - Key Requirements
-2. Always remember, top company will be the most frequent hiring company not the top CTC range. when there is two roles for same company, give it in one row.
-3. A short section titled "Know about the companies", showing a one line description of each company about tech stack, culture, or projects
-4. A short section titled "Why This Info Matters for Learners", showing how students can use this insight for better placement preparation.
+2. A short section titled "Know about the companies", showing a one line description of each company about tech stack, culture, or projects
+3. A short section titled "Why This Info Matters for Learners", showing how students can use this insight for better placement preparation.
 
 Make the summary professional, structured, and markdown formatted."""
     elif selected_table == 'projects':
@@ -200,26 +197,6 @@ Please provide a well-formatted response that includes:
 4. Information about real-world exposure and career benefits
 
 Make it engaging and motivational."""
-    elif selected_table=='Courses':
-         prompt = f"""You are helping students understand different courses available.
-
-Based on the following course data:
-{context}
-
-Query: {query}
-
-Generate a clear summary that includes:
-1. A table with:
-   - Course Code
-   - Course Name
-   - Description or Objective
-   - Duration
-   - Technologies Covered
-2. DO not use the same content for description, summarise from the given data and write something new.
-3. A short section titled "Why This Course?" explaining who the course is best suited for.
-4. A tip for students on how to choose the right course.
-
-Make the summary professional, markdown formatted, and helpful for students comparing courses."""
     else:
         prompt = f"""Based on the following data:
 {context}
@@ -242,25 +219,13 @@ tab1, tab2 = st.tabs(["Main", "Chat History"])
 with tab1:
     dataframes = init_db()
     query = st.text_input("What do you wanna know", key="user_input")
-
     if st.button("Ask"):
         st.session_state["last_query"] = query
         if query.strip():
             with st.spinner("Processing your query..."):
-                start_time = time.time()
                 response = query_data_with_gemini(dataframes, query)
-                end_time = time.time()
-
-            response_time = round(end_time - start_time, 2)
-
-            st.success(f"🕒 Response time: {response_time} seconds")
             st.markdown(response, unsafe_allow_html=True)
-            
-
-            st.session_state.chat_history.append({
-                "query": query,
-                "response": response
-            })
+            st.session_state.chat_history.append({"query": query, "response": response})
         else:
             st.warning("Please enter a query.")
 
