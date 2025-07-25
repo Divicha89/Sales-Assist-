@@ -1,4 +1,6 @@
+
 # pitchmate_streamlit.py
+import time
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -26,7 +28,7 @@ h1, h2, h3, h4, h5 { color: white; }
 </style>""", unsafe_allow_html=True)
 
 # --- Gemini API Key Setup ---
-gemini_api_key = "AIzaSyC9o79E9lW0eiCAxgHc8Xe0oGUPRK7dNd8"
+gemini_api_key = st.secrets["gemini"]["api_key"]
 if not gemini_api_key:
     st.error("Please provide a Gemini API key.")
     st.stop()
@@ -62,7 +64,7 @@ def handle_faq_selection():
 selected = st.sidebar.selectbox("FAQs", options, key="faq_selectbox", on_change=handle_faq_selection)
 
 # --- SQLite DB Integration ---
-DB_FILE = "courses_data.db"
+DB_FILE = "Database.db"
 @st.cache_resource
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -77,18 +79,20 @@ def init_db():
             st.error(f"Error loading table '{table}': {str(e)}")
     conn.close()
     return dataframes
-
-# --- Chat Functionality ---
 def query_data_with_gemini(dataframes, query):
     query_lower = query.lower()
 
+    # Updated mapping with consistent table name and additional keywords
     mapping = {
         "trainers": ["trainer", "coach"],
         "placements": ["placement", "ctc"],
         "companies": ["company", "companies"],
         "dscc_activities": ["dscc"],
-        "projects": ["project"]
+        "projects": ["project"],
+        "courses": ["program", "course", "curriculum", "dsai", "cfa"]  # Added course codes
     }
+
+    # Determine the selected table
     selected_table = None
     for key, terms in mapping.items():
         if any(term in query_lower for term in terms):
@@ -96,21 +100,34 @@ def query_data_with_gemini(dataframes, query):
             break
 
     if not selected_table:
-        return "Please specify what you're looking for (trainer, project, company, placement, or DSCC activity)."
+        return "Please specify what you're looking for (e.g., trainers, projects, companies, placements, DSCC activities, or Courses)."
 
     df = dataframes.get(selected_table)
     if df is None or df.empty:
         return f"No data found for {selected_table}."
 
-    possible_codes = dataframes['courses']['course_code'].tolist()
-    found_code = next((code for code in possible_codes if code.lower() in query_lower), None)
+    # Extract course code if present
+    possible_codes = dataframes['courses']['course_code'].tolist() if 'courses' in dataframes else []
+    
+    found_code = None
+    for code in possible_codes:
+        if code and code.lower() in query_lower:
+            found_code = code
+            break
+    if not found_code:
+        st.warning(f"Did not detect any known course code in the query: {query}")
 
-    if found_code and 'course' in df.columns:
-        df = df[df['course'].str.lower() == found_code.lower()]
+    # Filter courses table for specific course code queries
+    if selected_table == 'courses' and found_code:
+        if 'course_code' in df.columns:
+            df = df[df['course_code'].str.lower() == found_code.lower()]
+            if df.empty:
+                return f"No course found with code {found_code}."
+        else:
+            return "The 'course_code' column is missing from the courses table."
 
     context = df.to_string(index=False)
-
-    # --- Prompt Logic from gem.py ---
+    # Prompt Logic
     if selected_table == 'trainers':
         prompt = f"""Based on the following trainer data:
 {context}
@@ -142,17 +159,67 @@ Please ensure:
 - Use a simple and clean tone.
 """
     elif selected_table == 'placements':
-        prompt = f"""Based on the following placement data:
+        if "top" in query_lower:
+            prompt = prompt = f"""You are analyzing top placement insights.
+
+Based on the following placement data:
 {context}
 
 Query: {query}
 
-Please provide a well-formatted response that includes:
-1. A clear answer/summary at the top (e.g., "Top CTC record: X LPA")
-2. A table with Name, Course, Education Background, Company, Role, CTC, Location, Total Hires (sum of hires for each company)
-3. Inspiring student stories at the end with LinkedIn links, testimonial prompts
+Please return the response in the following format:
+1. Top hiring companies like below:
+### 📊 Top Hiring Companies (Based on Placement Frequency)
 
-Make it professional, structured, and motivational."""
+| Company Name | Number of Hires |
+|--------------|------------------|
+| TCS          | 12               |
+| Infosys      | 9                |
+| Wipro        | 6                |
+
+(Use actual company names and frequencies from the data above)
+
+---
+2. Top students placed at those companies:
+### ✅ Successful Hires at Top Hiring Company
+
+Below are students placed in **[Top Company]**:
+
+| Name | Course | Education Background | Role | CTC | Location |
+|------|--------|----------------------|------|-----|----------|
+| ...  | ...    | ...                  | ...  | ... | ...      |
+
+Please ensure:
+- Use markdown tables
+- show only top 5 company names and all the students placed in those companies.
+
+3.  *Why This Matters*
+   - One paragraph on how this helps learners understand industry trends, set career goals, and prepare for high-opportunity roles.
+
+4.  *Student Success Spotlights*
+   - Highlight a few standout placed students with: Name, Role, Company, Short quote/testimonial, LinkedIn link
+
+Keep the tone professional, encouraging, and use markdown formatting with tables and bold headings."""
+        else:
+            prompt = f"""You are helping students understand which companies are hiring.
+
+Based on the following company recruitment data:
+{context}
+
+Query: {query}
+
+Generate a detailed summary including:
+1. A table with:
+   - Company Name
+   - Roles Offered
+   - CTC Range
+   - Hiring Frequency
+   - Key Requirements
+2. Always remember, top company will be the most frequent hiring company not the top CTC range. when there is two roles for same company, give it in one row.
+3. A short section titled "Know about the companies", showing a one line description of each company about tech stack, culture, or projects
+4. A short section titled "Why This Info Matters for Learners", showing how students can use this insight for better placement preparation.
+
+Make the summary professional, structured, and markdown formatted."""
     elif selected_table == 'companies':
         prompt = f"""You are helping students understand which companies are hiring.
 
@@ -168,8 +235,9 @@ Generate a detailed summary including:
    - CTC Range
    - Hiring Frequency
    - Key Requirements
-2. A short section titled "Know about the companies", showing a one line description of each company about tech stack, culture, or projects
-3. A short section titled "Why This Info Matters for Learners", showing how students can use this insight for better placement preparation.
+2. Always remember, top company will be the most frequent hiring company not the top CTC range. when there is two roles for same company, give it in one row.
+3. A short section titled "Know about the companies", showing a one line description of each company about tech stack, culture, or projects
+4. A short section titled "Why This Info Matters for Learners", showing how students can use this insight for better placement preparation.
 
 Make the summary professional, structured, and markdown formatted."""
     elif selected_table == 'projects':
@@ -197,6 +265,66 @@ Please provide a well-formatted response that includes:
 4. Information about real-world exposure and career benefits
 
 Make it engaging and motivational."""
+    elif selected_table == 'courses':
+        # Enhanced prompt for course-specific queries
+        if "who can enroll" in query_lower or "eligibility" in query_lower:
+            prompt = f"""Based on the following course data:
+{context}
+
+Query: {query}
+
+Generate a clear and concise response focusing on eligibility for the specified course in a horizontal markdown table so it is consumable.:
+1. Title: Full course name
+2. Markdown table (horizontal layout) with:
+   - Course Code
+   - Course Name
+   - Description or Objective which you summarised from the data in excel, dont let it be exact.
+   - Eligibility criteria (e.g., educational background, skills, or experience required)
+   - if you could not find any specific "skills" make a little list from the program modules.
+   - Duration
+   - Technologies Covered - please done say not defined, just list some skills relevant to the course.
+3. A note on who this course is best suited for, talk about past experience, past education and skills to have.
+4. A breif catchy point with how the course can change the projection of the students career.
+5. Use a professional tone and markdown formatting in a table where appropriate.
+"""
+        elif "explain" in query_lower or "tell me about" in query_lower or found_code:
+            prompt = f"""Based on the following course data:
+{context}
+
+Query: {query}
+
+Generate a detailed summary for the specified course(s):
+1. If a specific course code (e.g., {found_code or 'any'}) is mentioned, provide:
+   - 2. Markdown table (horizontal layout) with:
+   - Course Code
+   - Course Name
+   - Description or Objective which you summarised from the data in excel, dont let it be exact.
+   - Eligibility criteria (e.g., educational background, skills, or experience required)
+   - if you could not find any specific "skills" make a little list from the program modules.
+   - Duration
+   - Technologies Covered - please done say not defined, just list some skills relevant to the course.
+   - Who this course is best suited for
+2. If no specific course is mentioned, provide a table summarizing all courses with the above fields.
+3. Include a tip for students on how to choose the right course.
+
+Make the summary professional, markdown formatted, and helpful for students comparing courses."""
+        else:
+            prompt = f"""Based on the following course data:
+{context}
+
+Query: {query}
+
+Generate a clear summary that includes:
+1. A table with:
+   - course_Code
+   - course_Name
+   - Description or Objective (summarized, not copied verbatim)
+   - Duration
+   - Technologies Covered
+2. A short section titled "Why This Course?" explaining who the course(s) is best suited for.
+3. A tip for students on how to choose the right course.
+
+Make the summary professional, markdown formatted, and helpful for students comparing courses."""
     else:
         prompt = f"""Based on the following data:
 {context}
@@ -209,7 +337,7 @@ Please analyze the query and provide a comprehensive, well-formatted response ba
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error processing query: {str(e)}"
 
 # --- UI Main ---
 if 'chat_history' not in st.session_state:
@@ -219,13 +347,25 @@ tab1, tab2 = st.tabs(["Main", "Chat History"])
 with tab1:
     dataframes = init_db()
     query = st.text_input("What do you wanna know", key="user_input")
+
     if st.button("Ask"):
         st.session_state["last_query"] = query
         if query.strip():
             with st.spinner("Processing your query..."):
+                start_time = time.time()
                 response = query_data_with_gemini(dataframes, query)
+                end_time = time.time()
+
+            response_time = round(end_time - start_time, 2)
+
+            st.success(f"🕒 Response time: {response_time} seconds")
             st.markdown(response, unsafe_allow_html=True)
-            st.session_state.chat_history.append({"query": query, "response": response})
+            
+
+            st.session_state.chat_history.append({
+                "query": query,
+                "response": response
+            })
         else:
             st.warning("Please enter a query.")
 
