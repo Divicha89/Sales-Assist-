@@ -1,4 +1,3 @@
-
 # pitchmate_streamlit.py
 import time
 import streamlit as st
@@ -42,16 +41,17 @@ st.sidebar.image("Imarticus.png", use_container_width=True)
 # --- FAQ Section ---
 st.sidebar.markdown("Frequently Asked Prompts")
 faq_questions = [
-    "Who are the trainers from Hyderabad",
-    "List all data science coaches",
-    "What are all the companies hiring",
-    "Are there any students placed as data engineer",
+    "List all PGA coaches from Hyderabad",
+    "List top hiring companies",
+    "What are the top placements",
     "Which companies offer high ctc",
-    "What are top placements",
+    "Details of CIBOP placements",
+    "Who can enroll for DSAI",
+    "list all financial domain courses",
     "List all dscc activities",
     "What DSCC activities are held monthly",
-    "what are the projects are in the curriculum",
-    "List all machine learning projects",
+    "what are the projects are in the curriculum"
+   
 ]
 options = ["FAQs"] + faq_questions
 
@@ -79,20 +79,19 @@ def init_db():
             st.error(f"Error loading table '{table}': {str(e)}")
     conn.close()
     return dataframes
-def query_data_with_gemini(dataframes, query):
-    query_lower = query.lower()
 
-    # Updated mapping with consistent table name and additional keywords
+# --- Streaming Query Function ---
+def stream_response_with_context(dataframes, query):
+    query_lower = query.lower()
     mapping = {
         "trainers": ["trainer", "coach"],
         "placements": ["placement", "ctc"],
         "companies": ["company", "companies"],
         "dscc_activities": ["dscc"],
         "projects": ["project"],
-        "courses": ["program", "course", "curriculum", "dsai", "cfa"]  # Added course codes
+        "courses": ["program", "course", "curriculum", "DSAI", "CFA", "PGFAP", "PGA","CIBOP"]
     }
 
-    # Determine the selected table
     selected_table = None
     for key, terms in mapping.items():
         if any(term in query_lower for term in terms):
@@ -100,31 +99,27 @@ def query_data_with_gemini(dataframes, query):
             break
 
     if not selected_table:
-        return "Please specify what you're looking for (e.g., trainers, projects, companies, placements, DSCC activities, or Courses)."
+        yield "Please specify what you're looking for (e.g., trainers, projects, companies, placements, DSCC activities, or Courses)."
+        return
 
     df = dataframes.get(selected_table)
     if df is None or df.empty:
-        return f"No data found for {selected_table}."
+        yield f"No data found for {selected_table}."
+        return
 
-    # Extract course code if present
-    possible_codes = dataframes['courses']['course_code'].tolist() if 'courses' in dataframes else []
-    
     found_code = None
-    for code in possible_codes:
-        if code and code.lower() in query_lower:
-            found_code = code
-            break
-    if not found_code:
-        st.warning(f"Did not detect any known course code in the query: {query}")
+    if selected_table == 'courses' and 'course_code' in df.columns:
+        possible_codes = df['course_code'].dropna().astype(str).tolist()
+        for code in possible_codes:
+            if code.lower() in query_lower:
+                found_code = code
+                break
 
-    # Filter courses table for specific course code queries
     if selected_table == 'courses' and found_code:
-        if 'course_code' in df.columns:
-            df = df[df['course_code'].str.lower() == found_code.lower()]
-            if df.empty:
-                return f"No course found with code {found_code}."
-        else:
-            return "The 'course_code' column is missing from the courses table."
+        df = df[df['course_code'].str.lower() == found_code.lower()]
+        if df.empty:
+            yield f"No course found with code {found_code}."
+            return
 
     context = df.to_string(index=False)
     # Prompt Logic
@@ -334,12 +329,15 @@ Query: {query}
 Please analyze the query and provide a comprehensive, well-formatted response based on the most relevant data. Use tables, bullet points, and clear sections as appropriate."""
 
     try:
-        response = model.generate_content(prompt)
-        return response.text
+        stream = model.generate_content(prompt, stream=True)
+        for chunk in stream:
+            if chunk.text:
+                yield chunk.text
     except Exception as e:
-        return f"Error processing query: {str(e)}"
+        yield f"❌ Error: {str(e)}"
 
 # --- UI Main ---
+
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
@@ -353,19 +351,21 @@ with tab1:
         if query.strip():
             with st.spinner("Processing your query..."):
                 start_time = time.time()
-                response = query_data_with_gemini(dataframes, query)
+
+                response_stream = stream_response_with_context(dataframes, query)
+                response_text = ""
+                response_placeholder = st.empty()
+                for chunk in response_stream:
+                    response_text += chunk
+                    response_placeholder.markdown(response_text, unsafe_allow_html=True)
+
                 end_time = time.time()
+                st.success(f"🕒 Response time: {round(end_time - start_time, 2)} seconds")
 
-            response_time = round(end_time - start_time, 2)
-
-            st.success(f"🕒 Response time: {response_time} seconds")
-            st.markdown(response, unsafe_allow_html=True)
-            
-
-            st.session_state.chat_history.append({
-                "query": query,
-                "response": response
-            })
+                st.session_state.chat_history.append({
+                    "query": query,
+                    "response": response_text
+                })
         else:
             st.warning("Please enter a query.")
 
